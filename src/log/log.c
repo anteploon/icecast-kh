@@ -394,6 +394,7 @@ int log_open(const char *filename)
 }
 
 
+
 static void _set_priorities (int id, log_levels_t *level)
 {
     if (loglist [id].in_use && loglist[id].log_head == NULL)
@@ -725,15 +726,16 @@ void log_close(int log_id)
     _lock_logger();
     do
     {
+        if (loglist [log_id].in_use != 1)
+            break;
         if (log_callback)
         {
-            if (loglist [log_id].in_use != 1)
-                break;
             _lock_q (log_id);
             loglist [log_id].flags |= LOG_CLOSING;
             _unlock_q (log_id);
             break;
         }
+        _lock_q (log_id);
         _log_close_internal (log_id);
     } while (0);
     _unlock_logger();
@@ -1189,4 +1191,3 @@ static int _get_log_id(void)
 
     return id;
 }
-

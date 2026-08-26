@@ -1,0 +1,20 @@
+FROM alpine:3.23 AS build
+
+RUN apk add --no-cache \
+        autoconf automake binutils build-base file libtool pkgconf \
+        curl-dev curl-static \
+        openssl-dev openssl-libs-static \
+        libxml2-dev libxml2-static libxslt-dev libxslt-static \
+        libogg-dev libogg-static libvorbis-dev libvorbis-static \
+        brotli-dev brotli-static c-ares-dev \
+        libidn2-dev libidn2-static libpsl-dev libpsl-static \
+        libunistring-dev libunistring-static \
+        nghttp2-dev nghttp2-static \
+        xz-dev xz-static zlib-dev zlib-static zstd-dev zstd-static
+
+WORKDIR /src
+COPY . .
+RUN ./build-static.sh --prefix=/usr/local
+
+FROM scratch AS artifact
+COPY --from=build /src/src/icecast /icecast

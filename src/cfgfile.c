@@ -2022,7 +2022,11 @@ mount_proxy *config_lock_mount (ice_config_t *_c, const char *mount)
 }
 
 
+#if LIBXML_VERSION >= 21200
+void config_xml_parse_failure (void *user, const xmlError *error)
+#else
 void config_xml_parse_failure (void *user, xmlErrorPtr error)
+#endif
 {
    if (error->file)
        log_parse_failure (user, "%s %s", error->file, error->message);

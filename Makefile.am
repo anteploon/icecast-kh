@@ -41,4 +41,6 @@ profile:
 staticdebug:
 	$(MAKE) all CFLAGS="-g -DLIBXML_STATIC -DCURL_STATICLIB" LDFLAGS="${LDFLAGS} -all-static"
 static:
-	$(MAKE) all CFLAGS="-O2 -DLIBXML_STATIC -DCURL_STATICLIB" LDFLAGS="${LDFLAGS} -static-libstdc++" CXXFLAGS=
+	@echo "Use ./build-static.sh (or the static-builder container); a fully static link"
+	@echo "needs the private dependency closure of libcurl, libxslt, and OpenSSL."
+	./build-static.sh
