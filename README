@@ -54,3 +54,5 @@ viewing doc/index.html in a browser.
 Please email us at icecast@xiph.org or icecast-dev@xiph.org, or come and see
 us at irc.freenode.net, channel #icecast, if you have any troubles.
 
+Static binary build: docker build -f Dockerfile.static --target artifact -o static-out .
+Result is static-out/icecast
