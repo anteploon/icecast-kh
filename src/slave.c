@@ -77,7 +77,7 @@ struct master_conn_details
     int ssl_port;
     int send_auth;
     int on_demand;
-    int previous;
+    size_t previous;
     int ok;
     int max_interval;
     int run_on;
@@ -967,61 +967,36 @@ static size_t streamlist_data (void *ptr, size_t size, size_t nmemb, void *strea
 {
     struct master_conn_details *master = stream;
     size_t passed_len = size*nmemb;
-    size_t len = passed_len;
-    char *buffer = ptr, *buf = ptr;
-    int prev = 0;
+    size_t len, remaining;
+    char *buffer, *buf;
 
     if (master->ok == 0)
         return passed_len;
-    if (master->previous)
-    {
-        char *eol = memchr (ptr, '\n', passed_len < 150 ? passed_len : 150);
-        if (eol == NULL)
-        {
-            if (passed_len > 150 || master->previous > 200)
-            {
-                WARN1 ("long line received for append, ignoring %ld", (long)passed_len);
-                return (master->ok = 0);
-            }
-            buffer = realloc (master->buffer, len + 1);
-            if (buffer == NULL) return 0;
-            master->buffer = buffer;
-            memcpy (master->buffer + master->previous, ptr, passed_len);
-            master->buffer [len] = '\0';
-            master->previous = len;
-            return passed_len;
-        }
-        // just fill out enough for 1 entry
-        len = (eol - buffer) + 1 + master->previous;
-        buffer = realloc (master->buffer, len + 1);
-        if (buffer == NULL) return 0;
-        master->buffer = buffer;
-        prev = len - master->previous;
-        memcpy (buffer+master->previous, ptr, prev);
-        buffer [len] = '\0';
-        buf = buffer;
-    }
+
+    if (passed_len > (size_t)-1 - master->previous - 1)
+        return 0;
+    len = master->previous + passed_len;
+    buffer = realloc (master->buffer, len + 1);
+    if (buffer == NULL)
+        return 0;
+    memmove (buffer + master->previous, ptr, passed_len);
+    buffer[len] = '\0';
+    master->buffer = buffer;
+    buf = buffer;
+    remaining = len;
 
     avl_tree_wlock (global.relays);
-    while (len)
+    while (remaining)
     {
-        int offset;
-        char *eol = strchr (buf, '\n');
-        if (eol)
-        {
-            offset = (eol - buf) + 1;
-            *eol = '\0';
-            eol = strchr (buf, '\r');
-            if (eol) *eol = '\0';
-        }
-        else
-        {
-            /* incomplete line, the rest may be in the next read */
-            master->buffer = calloc (1, len + 1);
-            memcpy (master->buffer, buf, len);
-            master->previous = len;
+        char *eol = memchr (buf, '\n', remaining);
+        size_t offset;
+
+        if (eol == NULL)
             break;
-        }
+        offset = (size_t)(eol - buf) + 1;
+        *eol = '\0';
+        if (eol > buf && eol[-1] == '\r')
+            eol[-1] = '\0';
 
         if (*buf == '/')
         {
@@ -1031,18 +1006,23 @@ static size_t streamlist_data (void *ptr, size_t size, size_t nmemb, void *strea
         else
             DEBUG1 ("skipping \"%s\"", buf);
         buf += offset;
-        len -= offset;
-        if (len == 0 && prev)
-        {
-            buf = ptr + prev;
-            len =  passed_len - prev;
-            free (master->buffer);
-            master->buffer = NULL;
-            master->previous = 0;
-            prev = 0;
-        }
+        remaining -= offset;
     }
     avl_tree_unlock (global.relays);
+
+    if (remaining > 350)
+    {
+        WARN1 ("long line received for append, ignoring %ld", (long)remaining);
+        master->ok = 0;
+        free (master->buffer);
+        master->buffer = NULL;
+        master->previous = 0;
+        return 0;
+    }
+    if (remaining && buf != buffer)
+        memmove (buffer, buf, remaining);
+    buffer[remaining] = '\0';
+    master->previous = remaining;
     return passed_len;
 }
 
@@ -1091,6 +1071,10 @@ static void *streamlist_thread (void *arg)
     {
         /* fall back to traditional request */
         INFO0 ("/admin/streams failed trying streamlist");
+        free (master->buffer);
+        master->buffer = NULL;
+        master->previous = 0;
+        master->ok = 0;
         snprintf (url, sizeof (url), "%s://%s:%d/admin/streamlist.txt%s",
                 protocol, master->server, port, master->args);
         curl_easy_setopt (handle, CURLOPT_URL, url);
@@ -1679,7 +1663,10 @@ static void *relay_switch (void *arg)
     relay_server_host *host = relay->hosts;
     char msg[100];
     int n = snprintf (msg, sizeof msg, "Checking %s ", relay->localmount);
-    int remain = sizeof msg - n;
+    size_t offset = n < 0 ? 0 : (size_t)n;
+    if (offset >= sizeof msg)
+        offset = sizeof msg - 1;
+    size_t remain = sizeof msg - offset;
 
     client_t *client = calloc (1, sizeof (client_t));
     connection_init (&client->connection, SOCK_ERROR, NULL);
@@ -1689,7 +1676,7 @@ static void *relay_switch (void *arg)
         if (global.running != ICE_RUNNING) break;
         if (relay_expired (relay)) break;
         if (host->skip_until > time(NULL)) continue;
-        snprintf (msg+n, remain, "host %s:%d%s prio %d", host->ip, host->port, host->mount, host->priority);
+        snprintf (msg+offset, remain, "host %s:%d%s prio %d", host->ip, host->port, host->mount, host->priority);
         DEBUG1 ("%s", msg);
         if (relay->in_use && host->priority >= relay->in_use->priority) break;
         // open host connection
@@ -1753,7 +1740,7 @@ static void *relay_switch (void *arg)
         break;
     } while ((host = host->next));
 
-    snprintf (msg+n, remain, "complete");
+    snprintf (msg+offset, remain, "complete");
     DEBUG1 ("%s", msg);
     if (client)
     {   // if still set then we need to clean up here.
